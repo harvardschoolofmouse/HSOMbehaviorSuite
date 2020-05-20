@@ -5,10 +5,10 @@ The Harvard School of Mouse (HSOM) Behavioral Control Suite consists of an Ardui
 
 Authors:
 
-  >Matlab Serial Interface:       Ofer Mazor
-  >Original Arduino State System Backbone:      Lingfeng Hou
-  >Matlab HSOM GUI Interface:       Lingfeng Hou and Allison Hamilos
-  >Harvard School of Mouse Arduino Controllers:       Allison Hamilos
+  >-Matlab Serial Interface:       Ofer Mazor
+  >-Original Arduino State System Backbone:      Lingfeng Hou
+  >-Matlab HSOM GUI Interface:       Lingfeng Hou and Allison Hamilos
+  >-Harvard School of Mouse Arduino Controllers:       Allison Hamilos
 
 Please note!! This repo is under construction. Last updated by Allison Hamilos on May 19, 2020. Please contact ahamilos{at}g.harvard.edu if you have questions.
 

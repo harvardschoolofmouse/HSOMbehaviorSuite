@@ -1,4 +1,5 @@
-# HSOMbehaviorSuite - The Harvard School of Mouse Behavioral Control Suite
+# HSOMbehaviorSuite
+## The Harvard School of Mouse Behavioral Control Suite
 Contains behavioral control files for use with MATLAB 2016B and Arduino
 
 The Harvard School of Mouse (HSOM) Behavioral Control Suite consists of an Arduino State System controller and MATLAB serial interface for setting parameters and collecting/viewing behavioral events on-line.

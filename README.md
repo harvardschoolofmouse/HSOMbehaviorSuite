@@ -1,7 +1,7 @@
 # HSOMbehaviorSuite
 ## The Harvard School of Mouse Behavioral Control Suite
 
-As used in Hamilos et al., eLife, 2021 (https://doi.org/10.7554/eLife.62583) and Hamilos and Assad, 2020 (https://doi.org/10.1101/2020.06.03.128272)
+As used in Hamilos et al., _eLife_, 2021 (https://doi.org/10.7554/eLife.62583) and Hamilos and Assad, 2020 (https://doi.org/10.1101/2020.06.03.128272)
 
 Contains behavioral control files for use with MATLAB 2016B and Arduino
 

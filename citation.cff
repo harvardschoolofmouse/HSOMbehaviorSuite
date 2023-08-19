@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Hamilos"
+  given-names: "Allison Elizabeth"
+  orcid: "https://orcid.org/0000-0001-9486-0017"
+- family-names: "Hou"
+  given-names: "Lingfeng"
+- family-names: "Mazor"
+  given-names: "Ofer"
+title: "The Harvard School of Mouse Behavioral Control Suite"
+version: 1.0.0
+date-released: 2020-05-19
+url: "https://github.com/harvardschoolofmouse/HSOMbehaviorSuite"

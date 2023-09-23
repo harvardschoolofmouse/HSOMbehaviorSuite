@@ -1423,10 +1423,8 @@ classdef MouseBehaviorInterface < handle
 			if isfield(obj.UserData, 'UpdatePlot') && (~obj.UserData.UpdatePlot)
 				return
 			end
-
 			data 				= obj.Arduino.EventMarkers;
 			ax 					= obj.Rsc.LooseFigures(figId).Ax;
-
 			eventCodeTrialStart = ax.UserData.EventCodeTrialStart;
 			eventCodeOfInterest = ax.UserData.EventCodeOfInterest;
 			eventCodeZero 		= ax.UserData.EventCodeZero;
@@ -1435,86 +1433,40 @@ classdef MouseBehaviorInterface < handle
             % -----
 			figName 			= ax.UserData.FigName;
 
-% 
-% 			trialMin = 1;
-% 			if obj.Arduino.TrialsCompleted >= 1
-% 				trialMax = obj.Arduino.TrialsCompleted;
-% 			else
-% 				trialMax = 1;
-% 			end
-
-
 			% If events did not occur at all, do not plot
 			if (isempty(data))
 				return
 			end
 
-			% Separate eventsOfInterest into trials, divided by eventsZero
-			eventsTrialStart	= find(data(:, 1) == eventCodeTrialStart);
-% 			eventsTrialStart    = eventsTrialStart(trialMin:trialMax);
-
-			eventsZero 			= find(data(:, 1) == eventCodeZero);
-			eventsOfInterest 	= find(data(:, 1) == eventCodeOfInterest);
-            eventsSecondary 	= find(data(:, 1) == eventCodeSecondaryType);
+			% Separate eventsOfInterest into trials, divided by eventsZero 
+			timesTrialStart	= data(find(data(:, 1) == eventCodeTrialStart),2);
+			% % exclude any excluded trials here
+			% timesTrialStart = timesTrialStart(trialMin:trialMax);
+			% gt the other times
+			eventTimesZero 			= data(find(data(:, 1) == eventCodeZero),2);
+			eventTimesOfInterest 	= data(find(data(:, 1) == eventCodeOfInterest),2);
+            timesSecondary 	= data(find(data(:, 1) == eventCodeSecondaryType),2);
 
 			% If events did not occur at all, do not plot
-			if (isempty(eventsTrialStart) || isempty(eventsZero) || isempty(eventsOfInterest))
+			if (isempty(timesTrialStart) || isempty(eventTimesZero) || isempty(eventTimesOfInterest))
 				return
             end
-            
-         
 
-			if eventsOfInterest(end) > eventsTrialStart(end) || eventsZero(end) > eventsTrialStart(end)
-				edges = [eventsTrialStart; max([eventsZero(end), eventsOfInterest(end)]) + 1];
-% AH 5/29/18 --- updated so can plot only subsets of trials..........
-%                 edges = [eventsTrialStart; eventsTrialStart(end) + 1];
-% --------------------------------------------------------------
-			else
-				edges = [eventsTrialStart; eventsTrialStart(end) + 1];
-			end
+            
+			edges = [timesTrialStart; timesTrialStart(end) + (timesTrialStart(end)-timesTrialStart(end-1))];
 
 			% Filter out 'orphan' eventsOfInterest that do not have an eventZero in the same trial 
-			[~, ~, trialsOfInterest] = histcounts(eventsOfInterest, edges);
-			[~, ~, trialsZero] = histcounts(eventsZero, edges);
+			[~, ~, trialsOfInterest] = histcounts(eventTimesOfInterest, edges);
+
+			[~, ~, trialsZero] = histcounts(eventTimesZero, edges);
             % ---- AH 5/14/18
-            [~, ~, trialsStim] = histcounts(eventsSecondary, edges);
+            [~, ~, trialsStim] = histcounts(timesSecondary, edges);
             %-----
-    
-			ism = ismember(trialsOfInterest, trialsZero);
-			if (sum(ism) == 0)
-				return
-            end
-			trialsOfInterest = trialsOfInterest(ism);
-			eventsOfInterest = eventsOfInterest(ism);
-            % ----- AH 5/14/18
-            ism2 = ismember(trialsOfInterest, trialsStim);
-            trialsStim = trialsOfInterest(ism2);
-            % TRIM OFF UNWANTED TRIALS HERE!!!!!!!!!! 5/29/18:
-            trialsOfInterest = trialsOfInterest(logical((trialsOfInterest >= trialMin) .* (trialsOfInterest <= trialMax)));
-            trialsStim = trialsStim(logical((trialsStim >= trialMin) .* (trialsStim <= trialMax)));
-            
-            %-------------
-            
-
-			% Get timestamps for events of interests and zero events
+         
+			% Get timestamps for events of interest and zero events
 			[C, ia, ~] 			= unique(trialsOfInterest);
-			eventsZero  		= eventsZero(C);
-
-% 5/29/18 AH ----  fixed this for trialMin and trialMax -- this will work
-% if only one event per trial, but will fail if there's more than one event
-% per trial
-            if trialMin == 1
-     			eventsOfInterest 	= eventsOfInterest(ia);
-                % so if you plot all trials, then can plot events for which
-                % multiple events occur on a trial. Otherwise, should only
-                % use trial min/trial max with events like FIRST_LICK
-            elseif trialMin ~= 1
-                eventsOfInterest 	= eventsOfInterest(C);
-            end
-            
-
-			eventTimesOfInterest 	= data(eventsOfInterest, 2);
-			eventTimesZero 			= data(eventsZero, 2);
+ 			eventTimesOfInterest 	= eventTimesOfInterest(ia);
+ 			eventTimesZero = eventTimesZero(C);
 			
 			% Substract two sets of timestamps to get relative times 
 			eventTimesOfInterest 	= eventTimesOfInterest - eventTimesZero;
@@ -1526,14 +1478,24 @@ classdef MouseBehaviorInterface < handle
             
             stim_index = find(ismember(trialsOfInterest,trialsStim));
             no_stim_index = find(~ismember(trialsOfInterest,trialsStim));
+            
+
+            % trim off unwanted trials here
+            stim_index = stim_index(ismember(stim_index, trialMin:trialMax));
+            no_stim_index = no_stim_index(ismember(no_stim_index, trialMin:trialMax));
+
             eventTimesOfInterest_Secondary = eventTimesOfInterest(stim_index);
             eventTimesOfInterest_noSecondary = eventTimesOfInterest(no_stim_index);
             obj.Rsc.Monitor.UserData.eventTimesOfInterest_Secondary = eventTimesOfInterest_Secondary;
             obj.Rsc.Monitor.UserData.eventTimesOfInterest_noSecondary = eventTimesOfInterest_noSecondary;
             median_noSecondary = nanmedian(eventTimesOfInterest_noSecondary(find(eventTimesOfInterest_noSecondary > 700)));
-            if ~isempty(eventsSecondary)
+            if ~isempty(timesSecondary)
                 median_Secondary = nanmedian(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
-                [obj.Rsc.Monitor.UserData.cdf_stim.f, obj.Rsc.Monitor.UserData.cdf_stim.x] = ecdf(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
+                if ~isnan(median_Secondary)
+                    [obj.Rsc.Monitor.UserData.cdf_stim.f, obj.Rsc.Monitor.UserData.cdf_stim.x] = ecdf(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
+                else
+                    warning('no stim trials >700ms yet')
+                end
                 
                 nosecondary = false;
             else
@@ -1545,6 +1507,11 @@ classdef MouseBehaviorInterface < handle
                 warning('no secondary events')
                 nosecondary = true;
             end
+
+
+            
+
+
 			% Plot histogram of selected event times
             %----------- AH 11-2-17
 %             disp(numBins)

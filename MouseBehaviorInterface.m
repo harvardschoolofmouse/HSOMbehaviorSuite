@@ -1,12 +1,14 @@
 %% MouseBehaviorInterface: construct graphical user interface to interact with arduino
 % 
 %	Authors:	Lingfeng Hou (ted-hou)
-% 				With contribution from Allison Hamilos (harvardschoolofmouse | ahamilos)
+% 				Allison Hamilos (harvardschoolofmouse | ahamilos)
 %
 %   Last Modified: ahamilos 9-23-23 
 % 
 % Update log:
-%	9-23-23: attempting to add task scheduler by ted-hou (ahamilos)
+%	9-23-23: added Lingfeng's task scheduler (requires MATLAB 2021B+ to run)
+%				improved plotting functions (require prettyHxg and makeStandardFigure)
+%				fixed issues with histogram tab
 %   11-2-17: updated histogram tab to allow UI of numBins (ahamilos)
 % 
 % 
@@ -1933,6 +1935,42 @@ classdef MouseBehaviorInterface < handle
                 %
 			end
 		end
+		function varargout = GetParam(obj, index)
+			p = inputParser;
+			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
+			parse(p, index);
+			index = p.Results.Index;
+
+			if ischar(index)
+				index = find(strcmpi(index, obj.Arduino.ParamNames));
+			end
+
+			if isempty(index)
+				varargout = {[]};
+			else
+				index = index(1);
+				varargout = {obj.Arduino.ParamValues(index)};
+			end
+		end
+
+		function SetParam(obj, index, value, varargin)
+			p = inputParser;
+			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
+			addRequired(p, 'Value', @isnumeric);
+			parse(p, index, value);
+			index = p.Results.Index;
+			value = p.Results.Value;
+
+			if ischar(index)
+				index = find(strcmpi(index, obj.Arduino.ParamNames));
+			end
+
+			if ~isempty(index)
+				index = index(1);
+				obj.Arduino.UpdateParams_AddToQueue(index, value);
+				obj.Arduino.UpdateParams_Execute();
+			end
+		end
 	end
 
 	%----------------------------------------------------
@@ -1983,42 +2021,7 @@ classdef MouseBehaviorInterface < handle
 			arduino.UpdateParams_Execute()
 		end
 
-		function varargout = GetParam(obj, index)
-			p = inputParser;
-			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
-			parse(p, index);
-			index = p.Results.Index;
-
-			if ischar(index)
-				index = find(strcmpi(index, obj.Arduino.ParamNames));
-			end
-
-			if isempty(index)
-				varargout = {[]};
-			else
-				index = index(1);
-				varargout = {obj.Arduino.ParamValues(index)};
-			end
-		end
-
-		function SetParam(obj, index, value, varargin)
-			p = inputParser;
-			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
-			addRequired(p, 'Value', @isnumeric);
-			parse(p, index, value);
-			index = p.Results.Index;
-			value = p.Results.Value;
-
-			if ischar(index)
-				index = find(strcmpi(index, obj.Arduino.ParamNames));
-			end
-
-			if ~isempty(index)
-				index = index(1);
-				obj.Arduino.UpdateParams_AddToQueue(index, value);
-				obj.Arduino.UpdateParams_Execute();
-			end
-		end
+		
 
 		function ArduinoStart(~, ~, arduino)
 			if ((~arduino.AutosaveEnabled) || isempty(arduino.ExperimentFileName))

@@ -1,21 +1,14 @@
 %% MouseBehaviorInterface: construct graphical user interface to interact with arduino
 % 
-% 	Created:	6-1-16 		Lingfeng Hou and Ofer Mazor
-%   Modified: 	11-2-17 	Allison Hamilos ahamilos{at}g.harvard.edu
+%	Authors:	Lingfeng Hou (ted-hou)
+% 				With contribution from Allison Hamilos (harvardschoolofmouse | ahamilos)
+%
+%   Last Modified: ahamilos 9-23-23 
 % 
 % Update log:
-%   11-2-17: updated histogram tab to allow UI of numBins (AH)
+%	9-23-23: attempting to add task scheduler by ted-hou (ahamilos)
+%   11-2-17: updated histogram tab to allow UI of numBins (ahamilos)
 % 
-% 
-% -------------------------------------------------------
-% 	
-% 	Creates a Matlab serial GUI interface for controlling the Harvard School of Mouse Arduino State System Controller
-% 
-% 	GUI and Behavior Interface developed by Lingfeng Hou
-% 	Custom Attachments for HSOM: 		Allison Hamilos
-% 	Original Matlab Serial Interface: 	Ofer Mazor
-% 
-% 	HSOM Logo: Allison Hamilos
 % 
 
 classdef MouseBehaviorInterface < handle
@@ -49,6 +42,16 @@ classdef MouseBehaviorInterface < handle
 
 			% Create Monitor window with all thr trial results and plots and stuff so the Grad Student is ON TOP OF THE SITUATION AT ALL TIMES.
 			obj.CreateDialog_Monitor()
+
+			% 9-23-23: adding task scheduler, comment out to remove as default
+			% Create Task Scheduler
+			% obj.CreateDialog_TaskScheduler()
+			if isfield(obj.Rsc, 'TaskScheduler') && isvalid(obj.Rsc.TaskScheduler)
+				position = obj.Rsc.TaskScheduler.OuterPosition(1:2) + [0, obj.Rsc.TaskScheduler.OuterPosition(4)];
+			else
+				position = [];
+			end
+
 
 			% Kill splash
 			if ~strcmp(arduinoPortName, '/offline')
@@ -100,8 +103,13 @@ classdef MouseBehaviorInterface < handle
 			);
 			dlg.UserData.Ctrl.Table_Params = table_params;
 
-			% Add listener for parameter change via non-GUI methods, in which case we'll update table_params
-			obj.Arduino.Listeners.ParamChanged = addlistener(obj.Arduino, 'ParamValues', 'PostSet', @obj.OnParamChanged);
+
+			% 9-23-23: Add listener for parameter change via non-GUI methods, in which case we'll update table_params
+			if ~isfield(obj.Arduino.Listeners, 'ParamChanged') || ~isvalid(obj.Arduino.Listeners.ParamChanged)
+				obj.Arduino.Listeners.ParamChanged = addlistener(obj.Arduino, 'ParamValues', 'PostSet', @obj.OnParamChanged);
+			end
+			% % Add listener for parameter change via non-GUI methods, in which case we'll update table_params
+			% obj.Arduino.Listeners.ParamChanged = addlistener(obj.Arduino, 'ParamValues', 'PostSet', @obj.OnParamChanged);
 
 			% Set width and height
 			table_params.Position(3:4) = table_params.Extent(3:4);
@@ -180,6 +188,7 @@ classdef MouseBehaviorInterface < handle
 			menu_window = uimenu(dlg, 'Label', '&Window');
 			uimenu(menu_window, 'Label', 'Experiment Control', 'Callback', @(~, ~) @obj.CreateDialog_ExperimentControl);
 			uimenu(menu_window, 'Label', 'Monitor', 'Callback', @(~, ~) obj.CreateDialog_Monitor);
+			uimenu(menu_window, 'Label', 'Task Scheduler', 'Callback', @(~, ~) obj.CreateDialog_TaskScheduler);
 
 			% Unhide dialog now that all controls have been created
 			dlg.Visible = 'on';
@@ -467,7 +476,7 @@ classdef MouseBehaviorInterface < handle
 			popup_eventSecondary_hist = uicontrol(...
 				'Parent', tab_hist,...
 				'Style', 'popupmenu',...
-				'String', obj.Arduino.EventMarkerNames...
+				'String', [obj.Arduino.EventMarkerNames,'None']...
 			);
 			dlg.UserData.Ctrl.Popup_EventSecondary_Hist = popup_eventSecondary_hist;
             %----
@@ -501,7 +510,7 @@ classdef MouseBehaviorInterface < handle
 				'HorizontalAlignment', 'left'...
 			);
 			dlg.UserData.Ctrl.Text_NumBins_Hist = text_numBins_hist;
-            numBins = 10;
+            numBins = 17;
 			edit_numBins_hist = uicontrol(...
 				'Parent', tab_hist,...
 				'Style', 'edit',...
@@ -637,6 +646,9 @@ classdef MouseBehaviorInterface < handle
 
 			% Unhide dialog now that all controls have been created
 			dlg.Visible = 'on';
+
+			% 9-23-23 load the default params...
+			obj.LoadPlotSettings('',true);
 		end
 
 		function CreateDialog_Nidaq(obj)
@@ -769,12 +781,264 @@ classdef MouseBehaviorInterface < handle
 			obj.Rsc.Splash.dispose;
 		end
 
+		% 9-23-23 adding task scheduler functions
+		%----------------------------------------------------
+		% 		Task scheduler
+		%----------------------------------------------------
+		function CreateDialog_TaskScheduler(obj, position)
+			if nargin < 2
+				position = [];
+				if isfield(obj.Rsc, 'ExperimentControl') && isvalid(obj.Rsc.ExperimentControl)
+					position = obj.Rsc.ExperimentControl.OuterPosition(1:2) + [0, obj.Rsc.ExperimentControl.OuterPosition(4)];
+				else
+					position = [10 550];
+				end
+			end
+
+			% If object already exists, show window
+			if isfield(obj.Rsc, 'TaskScheduler')
+				if isvalid(obj.Rsc.TaskScheduler)
+					figure(obj.Rsc.TaskScheduler)
+					return
+				end
+			end
+
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled')
+				obj.UserData.TaskSchedulerEnabled = false;
+			end
+
+			% Size and position of controls
+			numButtons = 4;
+			ctrlSpacingX = 0.05;
+			ctrlSpacingY = 0.025;
+			buttonWidth = (1 - (numButtons + 1)*ctrlSpacingX)/numButtons;
+			buttonHeight = 0.075;
+			tableWidth = 1 - 2*ctrlSpacingX;
+			tableHeight = 1 - buttonHeight - 3*ctrlSpacingY;
+
+			% Create the dialog
+			if isempty(obj.Arduino.SerialConnection)
+				port = 'OFFLINE';
+			else
+				port = obj.Arduino.SerialConnection.Port;
+			end
+			dlg = dialog(...
+				'Name', sprintf('Task Scheduler (%s)', port),...
+				'WindowStyle', 'normal',...
+				'Resize', 'on',...
+				'Units', 'pixels',...
+				'Visible', 'off'... % Hide until all controls created
+			);
+
+			% Store the dialog handle
+			obj.Rsc.TaskScheduler = dlg;
+
+			% Create a uitable for creating tasks
+			if isfield(obj.UserData, 'TaskSchedule')
+				data = obj.UserData.TaskSchedule;
+			else
+				data = repmat({'', 'NONE', []}, [24, 1]);
+			end
+			table_tasks = uitable(...
+				'Parent', dlg,...
+				'ColumnName', {'Trials', 'Action', 'Value'},...
+				'ColumnWidth', {'auto', 200, 'auto'},...
+				'ColumnFormat', {'char', ['NONE', obj.Arduino.ParamNames, 'STOP'], 'long'},...
+				'Data', data,...
+				'ColumnEditable', true,...
+				'Units', 'normalized',...
+				'Position', [ctrlSpacingX, buttonHeight + 2*ctrlSpacingY, tableWidth, tableHeight] ...
+			);
+			dlg.UserData.Ctrl.Table_Tasks = table_tasks;
+
+			% Apply button
+			button_apply = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', [ctrlSpacingX, ctrlSpacingY, buttonWidth, buttonHeight],...
+				'String', 'Apply',...
+				'TooltipString', 'Apply these settings.',...
+				'Callback', @obj.TaskSchedulerApply ...
+			);
+			hPrev = button_apply;
+			dlg.UserData.Ctrl.Button_Apply = hPrev;
+
+			% Enable/disable button
+			if obj.UserData.TaskSchedulerEnabled
+				buttonString = 'Disable';
+			else
+				buttonString = 'Enable';
+			end
+			button_enable = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', hPrev.Position,...
+				'String', buttonString,...
+				'TooltipString', 'Enable task scheduling.',...
+				'Callback', @obj.TaskSchedulerEnable ...
+			);
+			hPrev = button_enable;
+			dlg.UserData.Ctrl.Button_Enable = hPrev;
+			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
+
+			% Revert button
+			button_revert = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', hPrev.Position,...
+				'String', 'Revert',...
+				'TooltipString', 'Revert to previous setting.',...
+				'Callback', @obj.TaskSchedulerRevert ...
+			);
+			hPrev = button_revert;
+			dlg.UserData.Ctrl.Button_Revert = hPrev;
+			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
+
+			% Clear button
+			button_clear = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', hPrev.Position,...
+				'String', 'Clear',...
+				'TooltipString', 'Clear all settings.',...
+				'Callback', @obj.TaskSchedulerClear ...
+			);
+			hPrev = button_clear;
+			dlg.UserData.Ctrl.Button_Clear = hPrev;
+			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
+
+			% Menus
+			menu_window = uimenu(dlg, 'Label', '&Window');
+			uimenu(menu_window, 'Label', 'Experiment Control', 'Callback', @(~, ~) @obj.CreateDialog_ExperimentControl);
+			uimenu(menu_window, 'Label', 'Monitor', 'Callback', @(~, ~) obj.CreateDialog_Monitor);
+			uimenu(menu_window, 'Label', 'Task Scheduler', 'Callback', @(~, ~) obj.CreateDialog_TaskScheduler);
+			uimenu(menu_window, 'Label', 'Camera', 'Callback', @(~, ~) obj.CreateDialog_CameraControl);
+
+			% Resize dialog
+			dlg.Position(3:4) = [430, 280];
+			dlg.OuterPosition(1:2) = position;
+
+			% Unhide dialog now that all controls have been created
+			dlg.Visible = 'on';
+		end
+
+		function TaskSchedulerApply(obj, ~, ~)
+			obj.UserData.TaskSchedule = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data;
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled') || ~obj.UserData.TaskSchedulerEnabled
+				selection = questdlg(...
+					'Enable task scheduler?',...
+					'Enable',...
+					'Enable','No','No'...
+					);
+				if strcmp(selection, 'Enable')
+					obj.TaskSchedulerEnable(obj.Rsc.TaskScheduler.UserData.Ctrl.Button_Enable, [])
+				end
+			end
+		end
+
+		function TaskSchedulerEnable(obj, hButton, ~)
+			% Default to disabled
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled')
+				obj.UserData.TaskSchedulerEnabled = false;
+			end
+
+			% Toggle
+			obj.UserData.TaskSchedulerEnabled = ~obj.UserData.TaskSchedulerEnabled;
+
+			% Update button
+			if obj.UserData.TaskSchedulerEnabled
+				hButton.String = 'Disable';
+			else
+				hButton.String = 'Enable';
+			end
+		end
+
+		function TaskSchedulerRevert(obj, ~, ~)
+			if isfield(obj.UserData, 'TaskSchedule') && ~isempty(obj.UserData.TaskSchedule)
+				obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data = obj.UserData.TaskSchedule;
+			else
+				obj.TaskSchedulerClear();
+			end
+		end
+
+		function TaskSchedulerClear(obj, ~, ~)
+			if isfield(obj.Rsc, 'TaskScheduler')
+				obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data = repmat({'', 'NONE', []}, [size(obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data, 1), 1]);
+			end
+		end
+
+		function TaskSchedulerExecute(obj)
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled') || ~obj.UserData.TaskSchedulerEnabled
+				return
+			end
+
+			% How many trials have been completed so far
+			iTrial = obj.Arduino.TrialsCompleted;
+
+			% Parse the list
+			tasks = obj.UserData.TaskSchedule;
+			isItTimeYet = cellfun(@(str) obj.TaskSchedulerIsItTimeYet(str, iTrial), tasks(:, 1));
+
+			if ~isempty(find(isItTimeYet))
+				for iTask = transpose(find(isItTimeYet))
+					task = tasks{iTask, 2};
+					if strcmpi(task, 'STOP')
+						obj.ArduinoStop();
+						break
+					end
+					if strcmpi(task, 'NONE')
+						continue
+					end
+					oldValue = obj.GetParam(task);
+					newValue = tasks{iTask, 3};
+					if ~isempty(oldValue) && ~isempty(newValue)
+						obj.SetParam(task, newValue)
+					end
+				end
+			end
+		end
+
+		function isItTimeYet = TaskSchedulerIsItTimeYet(obj, str, iTrial)
+			isItTimeYet = false;
+			if isempty(str)
+				return
+			end
+
+			try
+				if contains(str, 'end', 'IgnoreCase', true)
+					parts = strsplit(str, ':');
+					if ~strcmpi(parts{end}, 'end') || nnz(cellfun(@(x) isempty(x), parts)) > 0
+						error('')
+					end
+					switch length(parts)
+						case 2
+							isItTimeYet = iTrial >= str2num(parts{1});
+						case 3
+							isItTimeYet = iTrial >= str2num(parts{1}) && rem(iTrial - str2num(parts{1}), str2num(parts{2})) == 0;
+					end
+				else
+					isItTimeYet = ismember(iTrial, eval(str));
+				end
+			catch
+				warning(['Failed to evaluate task scheduler parameter (', str, ')'])
+			end
+		end
+		%---end of 9-23-23 adding task scheduler functions
+
 		function OnTrialRegistered(obj, ~, ~)
 		% Executed when a new trial is completed
 			% Autosave if a savepath is defined
 			if (~isempty(obj.Arduino.ExperimentFileName) && obj.Arduino.AutosaveEnabled)
 				MouseBehaviorInterface.ArduinoSaveExperiment([], [], obj.Arduino);
 			end
+
+			% 9-23-23 task scheduler
+			% Task scheduling
+			obj.TaskSchedulerExecute();
 
 			% Updated monitor window
 			if isvalid(obj.Rsc.Monitor)
@@ -786,18 +1050,29 @@ classdef MouseBehaviorInterface < handle
 				t.String = sprintf('Trials completed: %d', iTrial);
 
 				% Show result of last trial
-				t = obj.Rsc.Monitor.UserData.Ctrl.LastTrialResultText;
-				t.String = sprintf('Last trial: %s', obj.Arduino.Trials(iTrial).CodeName);
+				% 9-23-23
+				if (iTrial > 0)
+					%--- end 9-23-23
+					t = obj.Rsc.Monitor.UserData.Ctrl.LastTrialResultText;
+					t.String = sprintf('Last trial: %s', obj.Arduino.Trials(iTrial).CodeName);
+				% 9-23-23
+				end
+				%--- end 9-23-23
 
 				% When a new trial is completed
 				ax = obj.Rsc.Monitor.UserData.Ctrl.Ax;
-				% Get a list of currently recorded result codes
-				resultCodes = reshape([obj.Arduino.Trials.Code], [], 1);
-				resultCodeNames = obj.Arduino.ResultCodeNames;
-				allResultCodes = 1:(length(resultCodeNames) + 1);
-				resultCodeCounts = histcounts(resultCodes, allResultCodes);
+				% 9-23-23 ---
+				if (iTrial > 0) % end 9-23-23
+					% Get a list of currently recorded result codes
+					resultCodes = reshape([obj.Arduino.Trials.Code], [], 1);
+					resultCodeNames = obj.Arduino.ResultCodeNames;
+					allResultCodes = 1:(length(resultCodeNames) + 1);
+					resultCodeCounts = histcounts(resultCodes, allResultCodes);
 
-				MouseBehaviorInterface.StackedBar(ax, resultCodeCounts, resultCodeNames);
+					MouseBehaviorInterface.StackedBar(ax, resultCodeCounts, resultCodeNames);
+				else % 9-23-23 conditional
+					cla(ax)
+				end%--- end 9-23-23 conditional
 			end
 
 			drawnow
@@ -851,7 +1126,9 @@ classdef MouseBehaviorInterface < handle
 			obj.Raster_Execute(figId);
 
 			% Plot again everytime an event of interest occurs
-			ax.UserData.Listener = addlistener(obj.Arduino, 'TrialsCompleted', 'PostSet', @(~, ~) obj.Raster_Execute(figId));
+			if ~isfield(ax.UserData, 'Listener') || ~isvalid(ax.UserData.Listener)
+				ax.UserData.Listener = addlistener(obj.Arduino, 'TrialsCompleted', 'PostSet', @(~, ~) obj.Raster_Execute(figId));
+			end % conditional as of 9-23-23
 			f.CloseRequestFcn = {@MouseBehaviorInterface.OnLooseFigureClosed, ax.UserData.Listener};
 		end
 		function Raster_Execute(obj, figId)
@@ -892,7 +1169,7 @@ classdef MouseBehaviorInterface < handle
 			ax.XLim 			= [max([-5000, ax.XLim(1) - 100]), ax.XLim(2) + 100];
 			ax.YLim 			= [0, obj.Arduino.TrialsCompleted + 1];
 			ax.YDir				= 'reverse';
-			ax.XLabel.String 	= 'Time (ms)';
+			ax.XLabel.String 	= 'Time (s)';
 			ax.YLabel.String 	= 'Trial';
 
 			% Set ytick labels
@@ -906,6 +1183,10 @@ classdef MouseBehaviorInterface < handle
 			end
 			ax.YTick 		= ticks;
 			ax.YTickLabel 	= ticks;
+
+			% Set xtick labels - now is sec 9-23-23
+			xtick = ax.XTick;
+			ax.XTickLabel = xtick/1000;
 
 			title(ax, figName)
 
@@ -1063,12 +1344,19 @@ classdef MouseBehaviorInterface < handle
 			trialMin = str2num(ctrl.Edit_TrialMin_Hist.String);
             %----------------------------------------------
 
-
-			obj.Hist(eventCodeTrialStart, eventCodeZero, eventCodeOfInterest, eventCodeSecondaryType, figName, numBins, trialMin, trialMax)
+            % Plot it for the first time
+			ax = obj.Hist(eventCodeTrialStart, eventCodeZero, eventCodeOfInterest, eventCodeSecondaryType, figName, numBins, trialMin, trialMax);
                 %-----------------
+
+            % new for 9-23-23: 
+            %Plot again everytime an event of interest occurs
+			if ~isfield(ax.UserData, 'Listener') || ~isvalid(ax.UserData.Listener)
+				ax.UserData.Listener = addlistener(obj.Arduino, 'TrialsCompleted', 'PostSet', @(~, ~) obj.Hist_Execute(eventCodeTrialStart, eventCodeZero, eventCodeOfInterest, eventCodeSecondaryType, figName, numBins, trialMin, trialMax));
+			end
+			f.CloseRequestFcn = {@MouseBehaviorInterface.OnLooseFigureClosed, ax.UserData.Listener};
         end
         %----------AH 11-2-17
-		function Hist(obj, eventCodeTrialStart, eventCodeZero, eventCodeOfInterest, eventCodeSecondaryType, figName, numBins, trialMin, trialMax)
+		function ax= Hist(obj, eventCodeTrialStart, eventCodeZero, eventCodeOfInterest, eventCodeSecondaryType, figName, numBins, trialMin, trialMax)
             %---------------
 			% First column in data is eventCode, second column is timestamp (since trial start)
 			if nargin < 6
@@ -1094,6 +1382,8 @@ classdef MouseBehaviorInterface < handle
 			if nargin < 9
 				trialMax = obj.Arduino.TrialsCompleted;
             end
+
+           
             
             %-----------------------
 			% Create axes object
@@ -1168,7 +1458,9 @@ classdef MouseBehaviorInterface < handle
 			% If events did not occur at all, do not plot
 			if (isempty(eventsTrialStart) || isempty(eventsZero) || isempty(eventsOfInterest))
 				return
-			end
+            end
+            
+         
 
 			if eventsOfInterest(end) > eventsTrialStart(end) || eventsZero(end) > eventsTrialStart(end)
 				edges = [eventsTrialStart; max([eventsZero(end), eventsOfInterest(end)]) + 1];
@@ -1236,12 +1528,21 @@ classdef MouseBehaviorInterface < handle
             eventTimesOfInterest_noSecondary = eventTimesOfInterest(no_stim_index);
             obj.Rsc.Monitor.UserData.eventTimesOfInterest_Secondary = eventTimesOfInterest_Secondary;
             obj.Rsc.Monitor.UserData.eventTimesOfInterest_noSecondary = eventTimesOfInterest_noSecondary;
-            
-            median_Secondary = nanmedian(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
-            [obj.Rsc.Monitor.UserData.cdf_stim.f, obj.Rsc.Monitor.UserData.cdf_stim.x] = ecdf(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
             median_noSecondary = nanmedian(eventTimesOfInterest_noSecondary(find(eventTimesOfInterest_noSecondary > 700)));
-            [obj.Rsc.Monitor.UserData.cdf_nostim.f, obj.Rsc.Monitor.UserData.cdf_nostim.x] = ecdf(eventTimesOfInterest_noSecondary(find(eventTimesOfInterest_noSecondary > 700)));
-            
+            if ~isempty(eventsSecondary)
+                median_Secondary = nanmedian(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
+                [obj.Rsc.Monitor.UserData.cdf_stim.f, obj.Rsc.Monitor.UserData.cdf_stim.x] = ecdf(eventTimesOfInterest_Secondary(find(eventTimesOfInterest_Secondary > 700)));
+                
+                nosecondary = false;
+            else
+                nosecondary = true;
+            end
+            try
+                [obj.Rsc.Monitor.UserData.cdf_nostim.f, obj.Rsc.Monitor.UserData.cdf_nostim.x] = ecdf(eventTimesOfInterest_noSecondary(find(eventTimesOfInterest_noSecondary > 700)));
+            catch
+                warning('no secondary events')
+                nosecondary = true;
+            end
 			% Plot histogram of selected event times
             %----------- AH 11-2-17
 %             disp(numBins)
@@ -1249,19 +1550,26 @@ classdef MouseBehaviorInterface < handle
 % 			histogram(ax, eventTimesOfInterest, str2double(numBins), 'DisplayName', obj.Arduino.EventMarkerNames{eventCodeOfInterest})
 			% disp('here')
 			cla(ax)
-            histogram(ax, eventTimesOfInterest_noSecondary, str2double(numBins), 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'])
+            % histogram(ax, eventTimesOfInterest_noSecondary, str2double(numBins), 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'])
+            %(ax, data, displayname, color, edges, nbins, Normalization)
+            tiles = linspace(0,17000,str2double(numBins));
+            prettyHxg(ax, eventTimesOfInterest_noSecondary, [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'], [0,0,0],tiles,[]);
             hold on
-            plot([median_noSecondary, median_noSecondary], [0,15], 'b-', 'LineWidth', 3, 'DisplayName', 'Median (>700ms) No Stim');
-            histogram(ax, eventTimesOfInterest_Secondary, str2double(numBins), 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' stim'])
-            plot([median_Secondary, median_Secondary], [0,15], 'm-', 'LineWidth', 3, 'DisplayName', 'Median (>700ms) + Stim');
+            yy = get(ax, 'ylim');
+            plot(ax,[median_noSecondary, median_noSecondary], yy, 'k-', 'LineWidth', 3, 'DisplayName', 'Median (>700ms) No Stim');
+            if ~nosecondary
+	            % histogram(ax, eventTimesOfInterest_Secondary, str2double(numBins), 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' stim'])
+	            prettyHxg(ax, eventTimesOfInterest_Secondary, [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' stim'],[0,0.8,1], tiles,str2double(numBins));
+	            plot(ax,[median_Secondary, median_Secondary], yy, '-', 'color', [0,0.8,1], 'LineWidth', 3, 'DisplayName', 'Median (>700ms) + Stim');
+            end
 
             % hold off
             %----------------
 			lgd = legend(ax, 'Location', 'northoutside');
 			lgd.Interpreter = 'none';
 			lgd.Orientation = 'horizontal';
-			ax.XLabel.String 	= 'Time (ms)';
-			ax.YLabel.String 	= 'Occurance';
+			ax.XLabel.String 	= 'Time (s)';
+			ax.YLabel.String 	= 'Proportion';
 			title(ax, figName)
 
 			% Store plot options cause for some reason it's lost unless we do this.
@@ -1270,6 +1578,9 @@ classdef MouseBehaviorInterface < handle
 			ax.UserData.EventCodeOfInterest = eventCodeOfInterest;
 			ax.UserData.EventCodeSecondary  = eventCodeSecondaryType;
 			ax.UserData.FigName 			= figName;
+						% Set xtick labels
+			xtick = ax.XTick;
+			ax.XTickLabel = xtick/1000;
 		end
 
 
@@ -1294,7 +1605,8 @@ classdef MouseBehaviorInterface < handle
         %----------AH 11-2-17
 		function CDF(obj, figName, eventCodeTrialStart, eventCodeZero, eventCodeOfInterest, eventCodeSecondaryType)
 			% Create axes object
-			f = figure('Name', figName, 'NumberTitle', 'off');
+			[f,~] = makeStandardFigure();
+			set(f, 'Name', figName, 'NumberTitle', 'off');
 
 			% Store the axes object
 			if ~isfield(obj.Rsc, 'LooseFigures')
@@ -1302,6 +1614,7 @@ classdef MouseBehaviorInterface < handle
 			else
 				figId = length(obj.Rsc.LooseFigures) + 1;
 			end
+
 			obj.Rsc.LooseFigures(figId).Ax = gca;
 			ax = obj.Rsc.LooseFigures(figId).Ax;
 
@@ -1350,16 +1663,19 @@ classdef MouseBehaviorInterface < handle
 
 			figName 		= ax.UserData.FigName;
 
-			plot(ax, cdf_nostim.x, cdf_nostim.f, 'LineWidth', 3, 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'])
+			plot(ax, cdf_nostim.x, cdf_nostim.f, 'k-','LineWidth', 3, 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'])
 			hold on
-			plot(ax, cdf_stim.x, cdf_stim.f, 'LineWidth', 3, 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' + stim'])
+			plot(ax, cdf_stim.x, cdf_stim.f,'-', 'color', [0.,0.7,1], 'LineWidth', 3, 'DisplayName', [obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' + stim'])
 			
-            
+            % Set xtick labels
+			xtick = ax.XTick;
+			ax.XTickLabel = xtick/1000;
+
             %----------------
 			lgd = legend(ax, 'Location', 'northoutside');
 			lgd.Interpreter = 'none';
 			lgd.Orientation = 'horizontal';
-			ax.XLabel.String 	= 'Time (ms)';
+			ax.XLabel.String 	= 'Time (s)';
 			ax.YLabel.String 	= 'cdf';
 			title(ax, figName)
 
@@ -1436,7 +1752,8 @@ classdef MouseBehaviorInterface < handle
             end
 
             % Create axes object
-			f = figure('Name', figName, 'NumberTitle', 'off');
+            [f,~] = makeStandardFigure();
+			set(f,'Name', figName, 'NumberTitle', 'off');
 
 			% Store the axes object
 			if ~isfield(obj.Rsc, 'LooseFigures')
@@ -1448,9 +1765,8 @@ classdef MouseBehaviorInterface < handle
 			ax = obj.Rsc.LooseFigures(figId).Ax;
             
             
-			histogram(ax, median_nostim, 'DisplayName', ['Median Bootstrap ',obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'])
-			hold on
-            histogram(ax, median_stim, 'DisplayName', ['Median Bootstrap ',obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' + stim'])
+			prettyHxg(ax, median_nostim, ['Median Bootstrap ',obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'], 'k', [],1000);
+            prettyHxg(ax, median_stim, ['Median Bootstrap ',obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' + stim'], [0,0.7,1],[],1000);
 			
             
             %----------------
@@ -1478,7 +1794,7 @@ classdef MouseBehaviorInterface < handle
 			ax = obj.Rsc.LooseFigures(figId).Ax;
             
             
-			histogram(ax, median_diff, 'DisplayName', ['Median Bootstrap Time Difference ',obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'])
+			prettyHxg(ax, median_diff, ['Median Bootstrap Time Difference ',obj.Arduino.EventMarkerNames{eventCodeOfInterest}, ' no stim'], 'k', [], 1000)
 			
             
             %----------------
@@ -1558,30 +1874,45 @@ classdef MouseBehaviorInterface < handle
 			save([filepath, filename], 'plotSettings')
 		end
 
-		function LoadPlotSettings(obj, errorMessage)
-			if nargin < 2
-				errorMessage = '';
+		function LoadPlotSettings(obj, errorMessage,LoadFromFile)
+			if nargin < 3
+				LoadFromFile = false;
 			end
-			% Display errorMessage prompt if called for
-			if ~isempty(errorMessage)
-				selection = questdlg(...
-					errorMessage,...
-					'Error',...
-					'Yes','No','Yes'...
-				);
-				% Exit if the Grad Student says 'No'
-				if strcmp(selection, 'No')
+			if LoadFromFile
+				try
+					stk = dbstack; 
+					filepath = which(stk(1).file);
+					filename = 'DefaultPlotParams.mat';
+                    p = load([filepath(1:end-24), filename]);
+				catch
+					warning('Could not load default plot params. Save default params as DefaultPlotParams.mat to folder containing MouseBehaviorInterface')
+				end
+			else
+				if nargin < 2
+					errorMessage = '';
+				end
+				% Display errorMessage prompt if called for
+				if ~isempty(errorMessage)
+					selection = questdlg(...
+						errorMessage,...
+						'Error',...
+						'Yes','No','Yes'...
+					);
+					% Exit if the Grad Student says 'No'
+					if strcmp(selection, 'No')
+						return
+					end
+				end
+
+				[filename, filepath] = uigetfile('*.mat', 'Load plot settings from file');
+				% Exit if no file selected
+				if ~(ischar(filename) && ischar(filepath))
 					return
 				end
+				% Load file
+                p = load([filepath, filename]);
 			end
-
-			[filename, filepath] = uigetfile('*.mat', 'Load plot settings from file');
-			% Exit if no file selected
-			if ~(ischar(filename) && ischar(filepath))
-				return
-			end
-			% Load file
-			p = load([filepath, filename]);
+			
 			% If loaded file does not contain parameters
 			if ~isfield(p, 'plotSettings')
 				% Ask the Grad Student if he wants to select another file instead
@@ -1651,6 +1982,44 @@ classdef MouseBehaviorInterface < handle
 			% Attempt to execute update queue now, if current state does not allow param update, the queue will be executed when we enter an appropriate state
 			arduino.UpdateParams_Execute()
 		end
+
+		function varargout = GetParam(obj, index)
+			p = inputParser;
+			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
+			parse(p, index);
+			index = p.Results.Index;
+
+			if ischar(index)
+				index = find(strcmpi(index, obj.Arduino.ParamNames));
+			end
+
+			if isempty(index)
+				varargout = {[]};
+			else
+				index = index(1);
+				varargout = {obj.Arduino.ParamValues(index)};
+			end
+		end
+
+		function SetParam(obj, index, value, varargin)
+			p = inputParser;
+			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
+			addRequired(p, 'Value', @isnumeric);
+			parse(p, index, value);
+			index = p.Results.Index;
+			value = p.Results.Value;
+
+			if ischar(index)
+				index = find(strcmpi(index, obj.Arduino.ParamNames));
+			end
+
+			if ~isempty(index)
+				index = index(1);
+				obj.Arduino.UpdateParams_AddToQueue(index, value);
+				obj.Arduino.UpdateParams_Execute();
+			end
+		end
+
 		function ArduinoStart(~, ~, arduino)
 			if ((~arduino.AutosaveEnabled) || isempty(arduino.ExperimentFileName))
 				selection = questdlg(...

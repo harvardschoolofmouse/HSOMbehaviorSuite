@@ -37,6 +37,7 @@ Last updated by Allison Hamilos on September 23, 2023. Please contact ahamilos{a
 ## Toolboxes
 
   - Instrument Control Toolbox
+  - Statistics and Machine Learning Toolbox
 
 ## Instructions
 

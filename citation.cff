@@ -9,6 +9,6 @@ authors:
 - family-names: "Mazor"
   given-names: "Ofer"
 title: "The Harvard School of Mouse Behavioral Control Suite"
-version: 1.0.0
-date-released: 2020-05-19
+version: 2.0.0
+date-released: 2023-09-23
 url: "https://github.com/harvardschoolofmouse/HSOMbehaviorSuite"

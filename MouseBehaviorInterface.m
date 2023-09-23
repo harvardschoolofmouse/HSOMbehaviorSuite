@@ -1,7 +1,7 @@
 %% MouseBehaviorInterface: construct graphical user interface to interact with arduino
 % 
 %	Authors:	Lingfeng Hou (ted-hou)
-% 				With contribution from Allison Hamilos (harvardschoolofmouse | ahamilos)
+% 			Allison Hamilos (harvardschoolofmouse | ahamilos)
 %
 %   Last Modified: ahamilos 9-23-23 
 % 

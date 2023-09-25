@@ -914,11 +914,18 @@ classdef MouseBehaviorInterface < handle
 			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
 
 			% Menus
+			menu_file = uimenu(dlg, 'Label', '&File');
+			uimenu(menu_file, 'Label', '&Save Scheduler Settings ...', 'Callback', @(~, ~) obj.SaveTaskSchedulerSettings, 'Accelerator', 's');
+			uimenu(menu_file, 'Label', '&Load Scheduler Settings ...', 'Callback', @(~, ~) obj.LoadTaskSchedulerSettings, 'Accelerator', 'l');
+			
+
+
 			menu_window = uimenu(dlg, 'Label', '&Window');
 			uimenu(menu_window, 'Label', 'Experiment Control', 'Callback', @(~, ~) @obj.CreateDialog_ExperimentControl);
 			uimenu(menu_window, 'Label', 'Monitor', 'Callback', @(~, ~) obj.CreateDialog_Monitor);
 			uimenu(menu_window, 'Label', 'Task Scheduler', 'Callback', @(~, ~) obj.CreateDialog_TaskScheduler);
 			uimenu(menu_window, 'Label', 'Camera', 'Callback', @(~, ~) obj.CreateDialog_CameraControl);
+
 
 			% Resize dialog
 			dlg.Position(3:4) = [430, 280];
@@ -926,6 +933,10 @@ classdef MouseBehaviorInterface < handle
 
 			% Unhide dialog now that all controls have been created
 			dlg.Visible = 'on';
+
+			% fetch default params
+			obj.LoadTaskSchedulerSettings('',true);
+
 		end
 
 		function TaskSchedulerApply(obj, ~, ~)
@@ -1818,8 +1829,22 @@ classdef MouseBehaviorInterface < handle
 			obj.UserData.UpdatePlot = false;
 		end
 
+		function SaveTaskSchedulerSettings(obj)
+			[filename, filepath] = uiputfile('DefaultTaskSchedulerParams.mat', 'Save task scheduler settings to file');
+			% Exit if no file selected
+			if ~(ischar(filename) && ischar(filepath))
+				warning('no file selected, did not save task scheduler params')
+				return
+			end
+
+			taskSchedulerSettings = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data;
+
+			save([filepath, filename], 'taskSchedulerSettings')
+		end
+		
+
 		function SavePlotSettings(obj)
-			[filename, filepath] = uiputfile('plot_parameters.mat', 'Save plot settings to file');
+			[filename, filepath] = uiputfile('DefaultPlotParams.mat', 'Save plot settings to file');
 			% Exit if no file selected
 			if ~(ischar(filename) && ischar(filepath))
 				return
@@ -1902,6 +1927,62 @@ classdef MouseBehaviorInterface < handle
                 %
 			end
 		end
+
+
+		function LoadTaskSchedulerSettings(obj, errorMessage,LoadFromFile)
+			if nargin < 3
+				LoadFromFile = false;
+			end
+			if LoadFromFile
+				try
+					stk = dbstack; 
+					filepath = which(stk(1).file);
+					filename = 'DefaultTaskSchedulerParams.mat';
+                    p = load([filepath(1:end-24), filename]);
+				catch
+					warning('Could not load default task scheduler params. Save default params as DefaultTaskSchedulerParams.mat to folder containing MouseBehaviorInterface')
+				end
+			else
+				if nargin < 2
+					errorMessage = '';
+				end
+				% Display errorMessage prompt if called for
+				if ~isempty(errorMessage)
+					selection = questdlg(...
+						errorMessage,...
+						'Error',...
+						'Yes','No','Yes'...
+					);
+					% Exit if the Grad Student says 'No'
+					if strcmp(selection, 'No')
+						return
+					end
+				end
+
+				[filename, filepath] = uigetfile('*.mat', 'Load task scheduler settings from file');
+				% Exit if no file selected
+				if ~(ischar(filename) && ischar(filepath))
+					return
+				end
+				% Load file
+                p = load([filepath, filename]);
+			end
+			
+			% If loaded file does not contain parameters
+			if ~isfield(p, 'taskSchedulerSettings')
+				% Ask the Grad Student if he wants to select another file instead
+				obj.LoadPlotSettings('The file you selected was not loaded because it does not contain task scheduler settings. Select another file instead?')
+			else
+				% If all checks are good then do the deed
+				% obj.UserData.TaskSchedule = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data
+				ctrl = obj.Rsc.TaskScheduler.UserData.Ctrl;
+				ctrl.Table_Tasks.Data = p.taskSchedulerSettings;
+				obj.UserData.TaskSchedule = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data;
+                %
+			end
+		end
+
+
 		function varargout = GetParam(obj, index)
 			p = inputParser;
 			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
@@ -2028,6 +2109,9 @@ classdef MouseBehaviorInterface < handle
 					obj.Arduino.Close()
 					delete(obj.Rsc.Monitor)
 					delete(obj.Rsc.ExperimentControl)
+					if isfield(obj.Rsc, 'TaskScheduler')
+						delete(obj.Rsc.TaskScheduler)
+					end
 					fprintf('Connection closed.\n')
 				case 'No'
 					return

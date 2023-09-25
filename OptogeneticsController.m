@@ -1,11 +1,10 @@
 %% OptogeneticsController: construct graphical user interface to interact with arduino
 % 
-% 	HSOM Github Version from Hamilos et al., 2020
-% 
-%   Last Modified: Allison Hamilos 3-16-18 (Adapted from MouseBehaviorInterface by Lingfeng Hou) 
+%   Last Modified: ahamilos 9-24-23 
 % 
 % Update log:
-%   11-2-17: updated histogram tab to allow UI of numBins (AH)
+%	9-24-23: Incorporating task scheduler
+%   3-16-18: (from OptogeneticsController 11/2/17 build, AH) 
 % 
 % 
 
@@ -40,6 +39,15 @@ classdef OptogeneticsController < handle
 
 			% Create Monitor window with all thr trial results and plots and stuff so the Grad Student is ON TOP OF THE SITUATION AT ALL TIMES.
 			obj.CreateDialog_Monitor()
+
+			% 9-23-23: adding task scheduler, comment out to remove as default
+			% Create Task Scheduler
+			obj.CreateDialog_TaskScheduler()
+			if isfield(obj.Rsc, 'TaskScheduler') && isvalid(obj.Rsc.TaskScheduler)
+				position = obj.Rsc.TaskScheduler.OuterPosition(1:2) + [0, obj.Rsc.TaskScheduler.OuterPosition(4)];
+			else
+				position = [];
+			end
 
 			% Kill splash
 			if ~strcmp(arduinoPortName, '/offline')
@@ -94,8 +102,12 @@ classdef OptogeneticsController < handle
 			);
 			dlg.UserData.Ctrl.Table_Params = table_params;
 
-			% Add listener for parameter change via non-GUI methods, in which case we'll update table_params
-			obj.Arduino.Listeners.ParamChanged = addlistener(obj.Arduino, 'ParamValues', 'PostSet', @obj.OnParamChanged);
+			% 9-23-23: Add listener for parameter change via non-GUI methods, in which case we'll update table_params
+			if ~isfield(obj.Arduino.Listeners, 'ParamChanged') || ~isvalid(obj.Arduino.Listeners.ParamChanged)
+				obj.Arduino.Listeners.ParamChanged = addlistener(obj.Arduino, 'ParamValues', 'PostSet', @obj.OnParamChanged);
+			end
+			% % Add listener for parameter change via non-GUI methods, in which case we'll update table_params
+			% obj.Arduino.Listeners.ParamChanged = addlistener(obj.Arduino, 'ParamValues', 'PostSet', @obj.OnParamChanged);
 
 			% Set width and height
 			table_params.Position(3:4) = table_params.Extent(3:4);
@@ -727,12 +739,275 @@ classdef OptogeneticsController < handle
 			obj.Rsc.Splash.dispose;
 		end
 
+		% 9-23-23 adding task scheduler functions
+		%----------------------------------------------------
+		% 		Task scheduler
+		%----------------------------------------------------
+		function CreateDialog_TaskScheduler(obj, position)
+			if nargin < 2
+				position = [];
+				if isfield(obj.Rsc, 'ExperimentControl') && isvalid(obj.Rsc.ExperimentControl)
+					position = obj.Rsc.ExperimentControl.OuterPosition(1:2) + [0, obj.Rsc.ExperimentControl.OuterPosition(4)];
+				else
+					position = [10 550];
+				end
+			end
+
+			% If object already exists, show window
+			if isfield(obj.Rsc, 'TaskScheduler')
+				if isvalid(obj.Rsc.TaskScheduler)
+					figure(obj.Rsc.TaskScheduler)
+					return
+				end
+			end
+
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled')
+				obj.UserData.TaskSchedulerEnabled = false;
+			end
+
+			% Size and position of controls
+			numButtons = 4;
+			ctrlSpacingX = 0.05;
+			ctrlSpacingY = 0.025;
+			buttonWidth = (1 - (numButtons + 1)*ctrlSpacingX)/numButtons;
+			buttonHeight = 0.075;
+			tableWidth = 1 - 2*ctrlSpacingX;
+			tableHeight = 1 - buttonHeight - 3*ctrlSpacingY;
+
+			% Create the dialog
+			if isempty(obj.Arduino.SerialConnection)
+				port = 'OFFLINE';
+			else
+				port = obj.Arduino.SerialConnection.Port;
+			end
+			dlg = dialog(...
+				'Name', sprintf('Task Scheduler (%s)', port),...
+				'WindowStyle', 'normal',...
+				'Resize', 'on',...
+				'Units', 'pixels',...
+				'Visible', 'off'... % Hide until all controls created
+			);
+
+			% Store the dialog handle
+			obj.Rsc.TaskScheduler = dlg;
+
+			% Create a uitable for creating tasks
+			if isfield(obj.UserData, 'TaskSchedule')
+				data = obj.UserData.TaskSchedule;
+			else
+				data = repmat({'', 'NONE', []}, [24, 1]);
+			end
+			table_tasks = uitable(...
+				'Parent', dlg,...
+				'ColumnName', {'Trials', 'Action', 'Value'},...
+				'ColumnWidth', {'auto', 200, 'auto'},...
+				'ColumnFormat', {'char', ['NONE', obj.Arduino.ParamNames, 'STOP'], 'long'},...
+				'Data', data,...
+				'ColumnEditable', true,...
+				'Units', 'normalized',...
+				'Position', [ctrlSpacingX, buttonHeight + 2*ctrlSpacingY, tableWidth, tableHeight] ...
+			);
+			dlg.UserData.Ctrl.Table_Tasks = table_tasks;
+
+			% Apply button
+			button_apply = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', [ctrlSpacingX, ctrlSpacingY, buttonWidth, buttonHeight],...
+				'String', 'Apply',...
+				'TooltipString', 'Apply these settings.',...
+				'Callback', @obj.TaskSchedulerApply ...
+			);
+			hPrev = button_apply;
+			dlg.UserData.Ctrl.Button_Apply = hPrev;
+
+			% Enable/disable button
+			if obj.UserData.TaskSchedulerEnabled
+				buttonString = 'Disable';
+			else
+				buttonString = 'Enable';
+			end
+			button_enable = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', hPrev.Position,...
+				'String', buttonString,...
+				'TooltipString', 'Enable task scheduling.',...
+				'Callback', @obj.TaskSchedulerEnable ...
+			);
+			hPrev = button_enable;
+			dlg.UserData.Ctrl.Button_Enable = hPrev;
+			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
+
+			% Revert button
+			button_revert = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', hPrev.Position,...
+				'String', 'Revert',...
+				'TooltipString', 'Revert to previous setting.',...
+				'Callback', @obj.TaskSchedulerRevert ...
+			);
+			hPrev = button_revert;
+			dlg.UserData.Ctrl.Button_Revert = hPrev;
+			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
+
+			% Clear button
+			button_clear = uicontrol(...
+				'Parent', dlg,...
+				'Style', 'pushbutton',...
+				'Units', 'normalized',...
+				'Position', hPrev.Position,...
+				'String', 'Clear',...
+				'TooltipString', 'Clear all settings.',...
+				'Callback', @obj.TaskSchedulerClear ...
+			);
+			hPrev = button_clear;
+			dlg.UserData.Ctrl.Button_Clear = hPrev;
+			hPrev.Position(1) = hPrev.Position(1) + ctrlSpacingX + buttonWidth;
+
+			% Menus
+			menu_file = uimenu(dlg, 'Label', '&File');
+			uimenu(menu_file, 'Label', '&Save Scheduler Settings ...', 'Callback', @(~, ~) obj.SaveTaskSchedulerSettings, 'Accelerator', 's');
+			uimenu(menu_file, 'Label', '&Load Scheduler Settings ...', 'Callback', @(~, ~) obj.LoadTaskSchedulerSettings, 'Accelerator', 'l');
+			
+
+
+			menu_window = uimenu(dlg, 'Label', '&Window');
+			uimenu(menu_window, 'Label', 'Experiment Control', 'Callback', @(~, ~) @obj.CreateDialog_ExperimentControl);
+			uimenu(menu_window, 'Label', 'Monitor', 'Callback', @(~, ~) obj.CreateDialog_Monitor);
+			uimenu(menu_window, 'Label', 'Task Scheduler', 'Callback', @(~, ~) obj.CreateDialog_TaskScheduler);
+			uimenu(menu_window, 'Label', 'Camera', 'Callback', @(~, ~) obj.CreateDialog_CameraControl);
+
+
+			% Resize dialog
+			dlg.Position(3:4) = [430, 280];
+			dlg.OuterPosition(1:2) = position;
+
+			% Unhide dialog now that all controls have been created
+			dlg.Visible = 'on';
+
+			% fetch default params
+			obj.LoadTaskSchedulerSettings('',true);
+
+		end
+		function TaskSchedulerApply(obj, ~, ~)
+			obj.UserData.TaskSchedule = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data;
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled') || ~obj.UserData.TaskSchedulerEnabled
+				selection = questdlg(...
+					'Enable task scheduler?',...
+					'Enable',...
+					'Enable','No','No'...
+					);
+				if strcmp(selection, 'Enable')
+					obj.TaskSchedulerEnable(obj.Rsc.TaskScheduler.UserData.Ctrl.Button_Enable, [])
+				end
+			end
+		end
+
+		function TaskSchedulerEnable(obj, hButton, ~)
+			% Default to disabled
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled')
+				obj.UserData.TaskSchedulerEnabled = false;
+			end
+
+			% Toggle
+			obj.UserData.TaskSchedulerEnabled = ~obj.UserData.TaskSchedulerEnabled;
+
+			% Update button
+			if obj.UserData.TaskSchedulerEnabled
+				hButton.String = 'Disable';
+			else
+				hButton.String = 'Enable';
+			end
+		end
+
+		function TaskSchedulerRevert(obj, ~, ~)
+			if isfield(obj.UserData, 'TaskSchedule') && ~isempty(obj.UserData.TaskSchedule)
+				obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data = obj.UserData.TaskSchedule;
+			else
+				obj.TaskSchedulerClear();
+			end
+		end
+
+		function TaskSchedulerClear(obj, ~, ~)
+			if isfield(obj.Rsc, 'TaskScheduler')
+				obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data = repmat({'', 'NONE', []}, [size(obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data, 1), 1]);
+			end
+		end
+
+		function TaskSchedulerExecute(obj)
+			if ~isfield(obj.UserData, 'TaskSchedulerEnabled') || ~obj.UserData.TaskSchedulerEnabled
+				return
+			end
+
+			% How many trials have been completed so far
+			iTrial = obj.Arduino.TrialsCompleted;
+
+			% Parse the list
+			tasks = obj.UserData.TaskSchedule;
+			isItTimeYet = cellfun(@(str) obj.TaskSchedulerIsItTimeYet(str, iTrial), tasks(:, 1));
+
+			if ~isempty(find(isItTimeYet))
+				for iTask = transpose(find(isItTimeYet))
+					task = tasks{iTask, 2};
+					if strcmpi(task, 'STOP')
+						obj.ArduinoStop();
+						break
+					end
+					if strcmpi(task, 'NONE')
+						continue
+					end
+					oldValue = obj.GetParam(task);
+					newValue = tasks{iTask, 3};
+					if ~isempty(oldValue) && ~isempty(newValue)
+						obj.SetParam(task, newValue)
+					end
+				end
+			end
+		end
+
+		function isItTimeYet = TaskSchedulerIsItTimeYet(obj, str, iTrial)
+			isItTimeYet = false;
+			if isempty(str)
+				return
+			end
+
+			try
+				if contains(str, 'end', 'IgnoreCase', true)
+					parts = strsplit(str, ':');
+					if ~strcmpi(parts{end}, 'end') || nnz(cellfun(@(x) isempty(x), parts)) > 0
+						error('')
+					end
+					switch length(parts)
+						case 2
+							isItTimeYet = iTrial >= str2num(parts{1});
+						case 3
+							isItTimeYet = iTrial >= str2num(parts{1}) && rem(iTrial - str2num(parts{1}), str2num(parts{2})) == 0;
+					end
+				else
+					isItTimeYet = ismember(iTrial, eval(str));
+				end
+			catch
+				warning(['Failed to evaluate task scheduler parameter (', str, ')'])
+			end
+		end
+		%---end of 9-23-23 adding task scheduler functions
+
+
 		function OnTrialRegistered(obj, ~, ~)
 		% Executed when a new trial is completed
 			% Autosave if a savepath is defined
 			if (~isempty(obj.Arduino.ExperimentFileName) && obj.Arduino.AutosaveEnabled)
 				OptogeneticsController.ArduinoSaveExperiment([], [], obj.Arduino);
 			end
+
+			% 9-23-23 task scheduler
+			% Task scheduling
+			obj.TaskSchedulerExecute();
 
 			% Updated monitor window
 			if isvalid(obj.Rsc.Monitor)
@@ -743,19 +1018,41 @@ classdef OptogeneticsController < handle
 				t = obj.Rsc.Monitor.UserData.Ctrl.TrialCountText;
 				t.String = sprintf('Trials completed: %d', iTrial);
 
+				% % Show result of last trial
+				% t = obj.Rsc.Monitor.UserData.Ctrl.LastTrialResultText;
+				% t.String = sprintf('Last trial: %s', obj.Arduino.Trials(iTrial).CodeName);
 				% Show result of last trial
-				t = obj.Rsc.Monitor.UserData.Ctrl.LastTrialResultText;
-				t.String = sprintf('Last trial: %s', obj.Arduino.Trials(iTrial).CodeName);
+				% 9-23-23
+				if (iTrial > 0)
+					%--- end 9-23-23
+					t = obj.Rsc.Monitor.UserData.Ctrl.LastTrialResultText;
+					t.String = sprintf('Last trial: %s', obj.Arduino.Trials(iTrial).CodeName);
+				% 9-23-23
+				end
+				%--- end 9-23-23
 
 				% When a new trial is completed
 				ax = obj.Rsc.Monitor.UserData.Ctrl.Ax;
-				% Get a list of currently recorded result codes
-				resultCodes = reshape([obj.Arduino.Trials.Code], [], 1);
-				resultCodeNames = obj.Arduino.ResultCodeNames;
-				allResultCodes = 1:(length(resultCodeNames) + 1);
-				resultCodeCounts = histcounts(resultCodes, allResultCodes);
 
-				OptogeneticsController.StackedBar(ax, resultCodeCounts, resultCodeNames);
+				% 9-23-23 ---
+				if (iTrial > 0) % end 9-23-23
+					% Get a list of currently recorded result codes
+					resultCodes = reshape([obj.Arduino.Trials.Code], [], 1);
+					resultCodeNames = obj.Arduino.ResultCodeNames;
+					allResultCodes = 1:(length(resultCodeNames) + 1);
+					resultCodeCounts = histcounts(resultCodes, allResultCodes);
+
+					OptogeneticsController.StackedBar(ax, resultCodeCounts, resultCodeNames);
+				else % 9-23-23 conditional
+					cla(ax)
+				end%--- end 9-23-23 conditional				
+				% % Get a list of currently recorded result codes
+				% resultCodes = reshape([obj.Arduino.Trials.Code], [], 1);
+				% resultCodeNames = obj.Arduino.ResultCodeNames;
+				% allResultCodes = 1:(length(resultCodeNames) + 1);
+				% resultCodeCounts = histcounts(resultCodes, allResultCodes);
+
+				% OptogeneticsController.StackedBar(ax, resultCodeCounts, resultCodeNames);
 			end
 
 			drawnow
@@ -809,7 +1106,10 @@ classdef OptogeneticsController < handle
 			obj.Raster_Execute(figId);
 
 			% Plot again everytime an event of interest occurs
-			ax.UserData.Listener = addlistener(obj.Arduino, 'TrialsCompleted', 'PostSet', @(~, ~) obj.Raster_Execute(figId));
+			% ax.UserData.Listener = addlistener(obj.Arduino, 'TrialsCompleted', 'PostSet', @(~, ~) obj.Raster_Execute(figId));
+			if ~isfield(ax.UserData, 'Listener') || ~isvalid(ax.UserData.Listener)
+				ax.UserData.Listener = addlistener(obj.Arduino, 'TrialsCompleted', 'PostSet', @(~, ~) obj.Raster_Execute(figId));
+			end % conditional as of 9-23-23
 			f.CloseRequestFcn = {@OptogeneticsController.OnLooseFigureClosed, ax.UserData.Listener};
 		end
 		function Raster_Execute(obj, figId)
@@ -864,6 +1164,9 @@ classdef OptogeneticsController < handle
 			end
 			ax.YTick 		= ticks;
 			ax.YTickLabel 	= ticks;
+			% Set xtick labels - now is sec 9-23-23
+			xtick = ax.XTick;
+			ax.XTickLabel = xtick/1000;
 
 			title(ax, figName)
 
@@ -1134,70 +1437,111 @@ classdef OptogeneticsController < handle
 			obj.UserData.UpdatePlot = false;
 		end
 
-		function SavePlotSettings(obj)
-			[filename, filepath] = uiputfile('plot_parameters.mat', 'Save plot settings to file');
+		%9-23-23 update---------------- till end of this section
+		function SaveTaskSchedulerSettings(obj)
+			[filename, filepath] = uiputfile('DefaultOptoTaskSchedulerParams.mat', 'Save task scheduler settings to file');
 			% Exit if no file selected
 			if ~(ischar(filename) && ischar(filepath))
+				warning('no file selected, did not save task scheduler params')
 				return
 			end
 
-			ctrl = obj.Rsc.Monitor.UserData.Ctrl;
+			optoTaskSchedulerSettings = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data;
 
-			plotSettings = {...
-				ctrl.Table_Params_Raster.Data,...
-				ctrl.Table_Events_Raster.Data,...
-				ctrl.Popup_EventTrialStart_Raster.Value,...
-				ctrl.Popup_EventZero_Raster.Value,...
-				ctrl.Popup_EventOfInterest_Raster.Value,...
-				ctrl.Popup_EventTrialStart_Hist.Value,...
-				ctrl.Popup_EventZero_Hist.Value,...
-				ctrl.Popup_EventOfInterest_Hist.Value...
-			};
-
-			save([filepath, filename], 'plotSettings')
+			save([filepath, filename], 'optoTaskSchedulerSettings')
 		end
-
-		function LoadPlotSettings(obj, errorMessage)
-			if nargin < 2
-				errorMessage = '';
+		
+		
+		function LoadTaskSchedulerSettings(obj, errorMessage,LoadFromFile)
+			if nargin < 3
+				LoadFromFile = false;
 			end
-			% Display errorMessage prompt if called for
-			if ~isempty(errorMessage)
-				selection = questdlg(...
-					errorMessage,...
-					'Error',...
-					'Yes','No','Yes'...
-				);
-				% Exit if the Grad Student says 'No'
-				if strcmp(selection, 'No')
+			if LoadFromFile
+				try
+					stk = dbstack; 
+					filepath = which(stk(1).file);
+					filename = 'DefaultOptoTaskSchedulerParams.mat';
+                    p = load([filepath(1:end-24), filename]);
+				catch
+					warning('Could not load default task scheduler params. Save default params as DefaultOptoTaskSchedulerParams.mat to folder containing OptogeneticsController')
+				end
+			else
+				if nargin < 2
+					errorMessage = '';
+				end
+				% Display errorMessage prompt if called for
+				if ~isempty(errorMessage)
+					selection = questdlg(...
+						errorMessage,...
+						'Error',...
+						'Yes','No','Yes'...
+					);
+					% Exit if the Grad Student says 'No'
+					if strcmp(selection, 'No')
+						return
+					end
+				end
+
+				[filename, filepath] = uigetfile('*.mat', 'Load task scheduler settings from file');
+				% Exit if no file selected
+				if ~(ischar(filename) && ischar(filepath))
 					return
 				end
+				% Load file
+                p = load([filepath, filename]);
 			end
-
-			[filename, filepath] = uigetfile('*.mat', 'Load plot settings from file');
-			% Exit if no file selected
-			if ~(ischar(filename) && ischar(filepath))
-				return
-			end
-			% Load file
-			p = load([filepath, filename]);
+			
 			% If loaded file does not contain parameters
-			if ~isfield(p, 'plotSettings')
+			if ~isfield(p, 'optoTaskSchedulerSettings')
 				% Ask the Grad Student if he wants to select another file instead
-				obj.LoadPlotSettings('The file you selected was not loaded because it does not contain plot settings. Select another file instead?')
+				obj.LoadPlotSettings('The file you selected was not loaded because it does not contain task scheduler settings. Select another file instead?')
 			else
 				% If all checks are good then do the deed
-				ctrl = obj.Rsc.Monitor.UserData.Ctrl;
-				ctrl.Table_Params_Raster.Data = p.plotSettings{1};
-				ctrl.Table_Events_Raster.Data = p.plotSettings{2};
-				ctrl.Popup_EventTrialStart_Raster.Value = p.plotSettings{3};
-				ctrl.Popup_EventZero_Raster.Value = p.plotSettings{4};
-				ctrl.Popup_EventOfInterest_Raster.Value = p.plotSettings{5};
-				ctrl.Popup_EventTrialStart_Hist.Value = p.plotSettings{6};
-				ctrl.Popup_EventZero_Hist.Value = p.plotSettings{7};
-				ctrl.Popup_EventOfInterest_Hist.Value = p.plotSettings{8};
+				% obj.UserData.TaskSchedule = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data
+				ctrl = obj.Rsc.TaskScheduler.UserData.Ctrl;
+				ctrl.Table_Tasks.Data = p.optoTaskSchedulerSettings;
+				obj.UserData.TaskSchedule = obj.Rsc.TaskScheduler.UserData.Ctrl.Table_Tasks.Data;
+                %
 			end
 		end
+
+
+		function varargout = GetParam(obj, index)
+			p = inputParser;
+			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
+			parse(p, index);
+			index = p.Results.Index;
+
+			if ischar(index)
+				index = find(strcmpi(index, obj.Arduino.ParamNames));
+			end
+
+			if isempty(index)
+				varargout = {[]};
+			else
+				index = index(1);
+				varargout = {obj.Arduino.ParamValues(index)};
+			end
+		end
+
+		function SetParam(obj, index, value, varargin)
+			p = inputParser;
+			addRequired(p, 'Index', @(x) isnumeric(x) || ischar(x));
+			addRequired(p, 'Value', @isnumeric);
+			parse(p, index, value);
+			index = p.Results.Index;
+			value = p.Results.Value;
+
+			if ischar(index)
+				index = find(strcmpi(index, obj.Arduino.ParamNames));
+			end
+
+			if ~isempty(index)
+				index = index(1);
+				obj.Arduino.UpdateParams_AddToQueue(index, value);
+				obj.Arduino.UpdateParams_Execute();
+			end
+		end %---end 9-23-23 update
 	end
 
 	%----------------------------------------------------
@@ -1293,6 +1637,7 @@ classdef OptogeneticsController < handle
 					obj.Arduino.Close()
 					delete(obj.Rsc.Monitor)
 					delete(obj.Rsc.ExperimentControl)
+					delete(obj.Rsc.TaskScheduler)
 					fprintf('Connection closed.\n')
 				case 'No'
 					return

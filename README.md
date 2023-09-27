@@ -17,7 +17,7 @@ The Harvard School of Mouse (HSOM) Behavioral Control Suite consists of an Ardui
   >
   >Harvard School of Mouse Arduino Controllers:       Allison Hamilos
 
-Last updated by Allison Hamilos on September 23, 2023. Please contact ahamilos{at}wi.mit.edu if you have questions or encounter issues.
+Last updated by Allison Hamilos on September 27, 2023. Please contact ahamilos{at}wi.mit.edu if you have questions or encounter issues.
 
 ## New to version 2.0
 
@@ -41,7 +41,7 @@ Last updated by Allison Hamilos on September 23, 2023. Please contact ahamilos{a
 
 ## Instructions
 
-0. Clone or download the repo. Add the folders to your MATLAB 2016B+ path.
+0. Clone or download the repo. Add the folders to your MATLAB 2021B+ path.
 1. You will need to configure each Arduino to match the pinouts annotated in the .ino files
 2. Upload the Photometry_and_Optogenetics_Controller_2019.ino Arduino file to the Behavior Controller Arduino
 3. Upload the Optogenetics_Controller4.ino Arduino file to the Optogenetics Controller Adruino
